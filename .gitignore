@@ -1,0 +1,95 @@
+# Prerequisites
+*.d
+
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# Linker output
+*.ilk
+*.map
+*.exp
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Libraries
+*.lib
+*.a
+*.la
+*.lo
+
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Kernel Module Compile Results
+*.mod*
+*.cmd
+.tmp_versions/
+modules.order
+Module.symvers
+Mkfile.old
+dkms.conf
+
+# Eclipse CDT files
+.cproject
+.project
+.settings/*
+
+# VSCode files
+.vscode/*
+
+# Build products
+build/*
+main/deps/*.d
+main/objs/*.o
+
+
+# ESP-IDF files
+dependencies.lock
+sdkconfig
+sdkconfig.old
+build/
+firmware_update_server/esp32c3/*.bin
+firmware_update_server/esp32s3/*.bin
+.clangd
+
+# Keep only components required by main and the managed mdns dependency.
+/components/*
+!/components/components/
+/components/components/*
+!/components/components/nvs_flash/
+!/components/components/esp_wifi/
+!/components/components/esp_event/
+!/components/components/esp_netif/
+!/components/components/esp_http_server/
+!/components/components/json/
+!/components/components/wifi_provisioning/
+/managed_components/*
+!/managed_components/espressif__mdns/
+
+# Other stuff
+*.diff
+*.bak
+/.DS_Store
+/sdkconfig.release.old
