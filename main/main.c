@@ -9,11 +9,21 @@
 #include "wifi_provisioning/scheme_softap.h"
 
 static httpd_handle_t server = NULL;
+static volatile uint32_t s_counter = 0;
+
+static void counter_task(void *arg)
+{
+    for (;;) {
+        s_counter++;
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
 
 static esp_err_t data_get_handler(httpd_req_t *req)
 {
     cJSON *root = cJSON_CreateObject();
-    cJSON_AddNumberToObject(root, "temperatura", 23.5);   // tu dato real
+    //cJSON_AddNumberToObject(root, "temperatura", 23.5);   // tu dato real
+    cJSON_AddNumberToObject(root, "contador", s_counter);
     char *txt = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, txt);
@@ -75,6 +85,8 @@ void app_main(void)
     esp_event_handler_register(WIFI_PROV_EVENT, ESP_EVENT_ANY_ID, event_handler, NULL);
     esp_event_handler_register(WIFI_EVENT,      ESP_EVENT_ANY_ID, event_handler, NULL);
     esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,     event_handler, NULL);
+
+    xTaskCreate(counter_task, "counter", 2048, NULL, 5, NULL);
 
     wifi_prov_mgr_config_t pcfg = {
         .scheme = wifi_prov_scheme_softap,
