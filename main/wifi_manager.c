@@ -15,7 +15,7 @@
 #include "cJSON.h"
 #include "wifi_manager.h"
 
-#define RESET_GPIO GPIO_NUM_9      /* BOOT del C3: mantener 2 s en los primeros 10 s tras arrancar */
+#define RESET_GPIO GPIO_NUM_0      /* BOOT del C3: mantener 2 s en los primeros 10 s tras arrancar */
 #define PORTAL_LINGER_MS 20000     /* el AP sigue 20 s tras conectar para que el telefono lea el resultado */
 
 typedef enum { ST_IDLE, ST_CONNECTING, ST_OK, ST_FAIL } prov_state_t;
