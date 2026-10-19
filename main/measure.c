@@ -8,9 +8,9 @@
 #include "measure.h"
 
 /* ---- Ajustes (revisalos antes de compilar) ---------------------------------- */
-#define PIN_STIM  GPIO_NUM_25         /* estimulo: inicia cada medicion            */
-#define PIN_VIS   GPIO_NUM_26         /* sensor visual                             */
-#define PIN_AUD   GPIO_NUM_27         /* sensor auditivo                           */
+#define PIN_STIM  GPIO_NUM_4         /* estimulo: inicia cada medicion            */
+#define PIN_VIS   GPIO_NUM_5         /* sensor visual                             */
+#define PIN_AUD   GPIO_NUM_6         /* sensor auditivo                           */
 #define EDGE      GPIO_INTR_NEGEDGE   /* flanco activo (pull-up + sensor que baja) */
 #define PULLUP_INTERNAL 1             /* 0 si usas pull-ups externos solamente     */
 #define DEAD_US    100000             /* zona muerta del pin de estimulo: 100 ms   */
