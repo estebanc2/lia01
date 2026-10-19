@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Configurar medidor</title>
+<style>
+:root{color-scheme:light dark;font-family:system-ui,sans-serif}
+body{max-width:30rem;margin:0 auto;padding:1rem;line-height:1.45}
+h1{font-size:1.4rem}ol{padding-left:1.2rem}
+button,input{font:inherit;box-sizing:border-box;padding:.7rem;border-radius:.6rem;border:1px solid #888}
+button{background:Canvas;color:CanvasText}
+input{width:100%;margin:.3rem 0}
+.net{display:block;width:100%;text-align:left;margin:.3rem 0}
+.sel{border:2px solid #0a7cff}
+.main{background:#0a7cff;border-color:#0a7cff;color:#fff;width:100%;margin-top:.8rem}
+.box{padding:1rem;border:1px solid #888;border-radius:.6rem;margin-top:1rem}
+.hide{display:none}.err{color:#d33;font-weight:600}
+</style></head><body>
+<h1>Configurar el medidor</h1>
+
+<div id="form">
+  <ol>
+    <li>Selecciona tu red WiFi (debe ser de <b>2.4&nbsp;GHz</b>).</li>
+    <li>Escribe la clave.</li>
+    <li>Pulsa <b>Conectar</b> y espera unos segundos.</li>
+  </ol>
+  <div id="nets">Buscando redes…</div>
+  <button type="button" onclick="scan(true)">Buscar de nuevo</button>
+  <button type="button" onclick="pick('')">Mi red no aparece</button>
+  <div id="cred" class="hide">
+    <input id="ssid" placeholder="Nombre de la red" autocapitalize="none" autocorrect="off">
+    <input id="pass" type="password" placeholder="Clave (vacía si la red es abierta)">
+    <label><input id="show" type="checkbox" style="width:auto" onchange="pass.type=this.checked?'text':'password'"> Mostrar clave</label>
+    <button class="main" type="button" onclick="go()">Conectar</button>
+  </div>
+</div>
+
+<div id="wait" class="box hide">Conectando… esto puede tardar hasta 20&nbsp;segundos. No cierres esta página.</div>
+
+<div id="done" class="box hide">
+  <b>¡Listo! El medidor se conectó a «<span id="d_ssid"></span>».</b>
+  <ol>
+    <li>Conecta este teléfono o computadora a la red <b id="d_ssid2"></b>.</li>
+    <li>Abre el navegador (Safari, Chrome…) y entra a <b id="l_host"></b>.<br>
+        Si no abre, prueba con <b id="l_ip"></b>.</li>
+  </ol>
+  <small>La red «Medidor-…» se apagará en unos segundos. Si esto se abrió en una ventana
+  de asistente, usa el navegador normal para el paso 2.</small>
+</div>
+
+<div id="fail" class="box hide">
+  <div class="err" id="f_msg"></div>
+  <button class="main" type="button" onclick="show('form')">Reintentar</button>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const pass=$('pass');
+function show(id){for(const s of['form','wait','done','fail'])$(s).classList.toggle('hide',s!==id)}
+function pick(name,btn){
+  $('cred').classList.remove('hide');
+  $('ssid').value=name;
+  document.querySelectorAll('.net').forEach(b=>b.classList.toggle('sel',b===btn));
+  (name?pass:$('ssid')).focus();
+}
+async function scan(re){
+  $('nets').textContent='Buscando redes…';
+  try{
+    const list=await(await fetch('/scan'+(re?'?rescan=1':''))).json();
+    const best={};
+    list.forEach(n=>{if(!best[n.ssid]||n.rssi>best[n.ssid].rssi)best[n.ssid]=n});
+    const nets=Object.values(best).sort((a,b)=>b.rssi-a.rssi);
+    $('nets').textContent='';
+    nets.forEach(n=>{
+      const b=document.createElement('button');
+      b.type='button';b.className='net';
+      b.textContent=n.ssid+(n.open?'':'  🔒');
+      b.onclick=()=>pick(n.ssid,b);
+      $('nets').appendChild(b);
+    });
+    if(!nets.length)$('nets').textContent='No se encontraron redes. Pulsa «Buscar de nuevo».';
+  }catch(e){$('nets').textContent='Error al buscar redes. Pulsa «Buscar de nuevo».'}
+}
+async function go(){
+  const ssid=$('ssid').value.trim();
+  if(!ssid){$('ssid').focus();return}
+  show('wait');
+  try{
+    await fetch('/connect',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ssid:ssid,pass:pass.value})});
+    poll(ssid);
+  }catch(e){$('f_msg').textContent='Se perdió la conexión con el medidor.';show('fail')}
+}
+async function poll(ssid){
+  try{
+    const s=await(await fetch('/status')).json();
+    if(s.state==='connecting'||s.state==='idle'){setTimeout(()=>poll(ssid),1000);return}
+    if(s.state==='ok'){
+      $('d_ssid').textContent=ssid;$('d_ssid2').textContent='«'+ssid+'»';
+      $('l_host').textContent='http://'+s.host;$('l_ip').textContent='http://'+s.ip;
+      show('done');return;
+    }
+    $('f_msg').textContent=s.err||'No se pudo conectar.';show('fail');
+  }catch(e){setTimeout(()=>poll(ssid),1500)}
+}
+scan(false);
+</script></body></html>
