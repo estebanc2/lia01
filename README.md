@@ -63,7 +63,7 @@ main/
 ├── app.html          # página de resultados y configuración (embebida en el firmware)
 ├── idf_component.yml # dependencia: espressif/mdns
 └── CMakeLists.txt
-sdkconfig.defaults    # CONFIG_HTTPD_WS_SUPPORT=y
+sdkconfig.defaults    # WebSocket, flash de 4 MB y otros ajustes
 ```
 
 ## Compilar y cargar
@@ -77,7 +77,7 @@ Requisitos: **ESP-IDF 5.5** instalado y activado, y una placa ESP32 o ESP32-C3.
    ```
 2. Elige el chip: `idf.py set-target esp32` (o `esp32c3`). Ten en cuenta que esto regenera el `sdkconfig`; por eso el soporte de WebSocket se activa desde `sdkconfig.defaults`.
 3. Revisa los pines en `main/measure.c` y `RESET_GPIO` en `main/wifi_manager.c` según tu placa.
-4. Si tu placa tiene 4 MB de flash, configúralo en `idf.py menuconfig` → *Serial flasher config → Flash size*.
+4. `sdkconfig.defaults` asume **4 MB de flash**; si tu placa tiene otro tamaño, cámbialo en `idf.py menuconfig` → *Serial flasher config → Flash size*.
 5. Compila y carga:
    ```
    idf.py build flash monitor
