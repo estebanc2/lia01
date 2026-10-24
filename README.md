@@ -67,6 +67,8 @@ En el **ESP32 clásico**, los GPIO 6 a 11 pertenecen a la flash y no deben usars
 - **Estéreo:** el canal izquierdo y el derecho necesitan cada uno su micrófono (o salida del equipo de audio), amplificador y comparador, con el mismo retardo. Si los circuitos no son idénticos, la diferencia izquierda−derecha incluirá la del circuito.
 - Si el LED de estado está cerca del sensor visual, colócalo en una caja o pantalla opaca.
 
+![esquematico](esquema.png)
+
 ## Estructura
 
 ```
