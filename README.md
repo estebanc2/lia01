@@ -1,6 +1,6 @@
 # Medidor de latencias con ESP32
 
-Firmware para **ESP32 / ESP32-C3** (ESP-IDF 5.5) que mide, con resolución de microsegundos, el tiempo entre una **marca** y dos estímulos, uno **visual** y uno **auditivo**. Está pensado para experimentos sensibles a interferencias de radio (por ejemplo, junto a un EEG): configuras y ves el equipo funcionar desde el teléfono, y durante la captura el **WiFi se apaga**. Al terminar, los datos quedan guardados en flash y se descargan en CSV.
+Firmware para **ESP32 / ESP32-C3** (ESP-IDF 5.5) que mide, con resolución de microsegundos, el tiempo entre una **marca** y tres estímulos: uno **visual** y dos **auditivos** (oído **izquierdo** y **derecho**, para el estéreo). Está pensado para experimentos sensibles a interferencias de radio (por ejemplo, junto a un EEG): configuras y ves el equipo funcionar desde el teléfono, y durante la captura el **WiFi se apaga**. Al terminar, los datos quedan guardados en flash y se descargan en CSV.
 
 > **Estado:** en desarrollo. Ver [Estado del proyecto](#estado-del-proyecto).
 
@@ -10,7 +10,7 @@ Firmware para **ESP32 / ESP32-C3** (ESP-IDF 5.5) que mide, con resolución de mi
 2. **Iniciar captura.** Borra los datos guardados antes (descárgalos primero) y empieza a guardar cada experimento en flash.
    - Con **«Apagar el WiFi durante la captura»**, el equipo espera a que se desconecte el último dispositivo (2 s) y apaga el radio por completo.
    - Sin esa opción, sigue en línea: la página muestra los resultados en vivo y tiene un botón **Detener captura**.
-3. **Capturar.** Un LED hace un destello breve cada 2 s mientras captura.
+3. **Capturar.** Un LED hace un destello breve cada 2 s mientras captura (en la DevKitC-02, el LED RGB destella en verde; con «Apagar el WiFi» muestra ámbar fijo mientras espera a que se desconecte el teléfono).
 4. **Terminar.** Pulsa el **botón de fin** (o el reset). Vuelve el WiFi con los datos disponibles.
 5. **Descargar.** En la página: tabla, estadísticas (media, desviación estándar, mínimo, máximo) y **Descargar CSV**.
 
@@ -19,12 +19,13 @@ Un corte de energía no pierde lo ya guardado, y el equipo siempre arranca en mo
 ## Cómo funciona la medición
 
 ```
- primer flanco de cualquiera de las tres señales ──► abre el experimento
- cada señal guarda su primer flanco (marca, visual, auditivo)
- se cierra cuando llegaron las tres, o al cumplirse la duración máxima
+ primer flanco de cualquiera de las cuatro señales ──► abre el experimento
+ cada señal guarda su primer flanco (marca, visual, auditivo izquierdo, auditivo derecho)
+ se cierra cuando llegaron las cuatro, o al cumplirse la duración máxima
 
  Δ visual   = t_visual   − t_marca
- Δ auditivo = t_auditivo − t_marca        (negativo si la marca llegó después)
+ Δ izquierdo = t_aud_izq − t_marca
+ Δ derecho   = t_aud_der − t_marca      (negativos si la marca llegó después)
 ```
 
 - Después del primer flanco de cada señal, los siguientes (rebotes, oscilaciones de un tono) se ignoran.
@@ -50,9 +51,12 @@ Los pines se eligen según el chip en `main/pins.h`:
 |---|---|---|
 | Marca (si es por pin) | GPIO 25 | GPIO 4 |
 | Estímulo visual | GPIO 26 | GPIO 5 |
-| Estímulo auditivo | GPIO 27 | GPIO 6 |
-| LED de captura | GPIO 2 | GPIO 7 |
+| Estímulo auditivo izquierdo | GPIO 27 | GPIO 6 |
+| Estímulo auditivo derecho | GPIO 32 | GPIO 7 |
+| LED de captura | GPIO 2 | GPIO 8 (RGB de la DevKitC-02) |
 | Botón de fin | GPIO 0 (BOOT) | GPIO 9 (BOOT) |
+
+El LED RGB de la ESP32-C3-DevKitC-02 es direccionable (WS2812) y está en el GPIO8; el firmware lo maneja con el periférico RMT. El LED rojo de alimentación de esa placa no se puede apagar por software. Para una placa propia con un LED simple, pon `LED_RGB 0` y el pin que uses en `pins.h`.
 
 En el **ESP32 clásico**, los GPIO 6 a 11 pertenecen a la flash y no deben usarse. Por defecto las entradas son de **bajada con pull-up interno** (`PULLUP_INTERNAL` en `measure.c`); el flanco de cada señal se cambia desde la página.
 
@@ -60,6 +64,7 @@ En el **ESP32 clásico**, los GPIO 6 a 11 pertenecen a la flash y no deben usars
 
 - **Visual:** un fotodiodo desnudo entrega microamperios y no alcanza para un pull-up. Es más práctico un **fototransistor** con pull-up de 10 kΩ a 100 kΩ, o un módulo con comparador (por ejemplo LM393).
 - **Auditivo:** un micrófono entrega milivoltios alternos; requiere **amplificador y comparador** (o un módulo de sonido con salida digital) antes del GPIO.
+- **Estéreo:** el canal izquierdo y el derecho necesitan cada uno su micrófono (o salida del equipo de audio), amplificador y comparador, con el mismo retardo. Si los circuitos no son idénticos, la diferencia izquierda−derecha incluirá la del circuito.
 - Si el LED de estado está cerca del sensor visual, colócalo en una caja o pantalla opaca.
 
 ## Estructura
@@ -97,7 +102,7 @@ Requisitos: **ESP-IDF 5.5** instalado y activado, y una placa ESP32 o ESP32-C3 c
 |---|---|
 | `GET /` | página |
 | `GET /state` | modo, datos guardados, configuración, últimos experimentos y estadísticas |
-| `POST /config` | `{"gap":100,"max":2000,"r":[0,0,0],"wifi_off":1,"src":1}` (`r`: 0 = bajada, 1 = subida, en orden marca, visual, auditivo) |
+| `POST /config` | `{"gap":100,"max":2000,"r":[0,0,0,0],"wifi_off":1,"src":1}` (`r`: 0 = bajada, 1 = subida, en orden marca, visual, auditivo izquierdo, auditivo derecho) |
 | `POST /start` | borra lo guardado y empieza la captura |
 | `POST /stop` | termina la captura |
 | `POST /clear` | vacía la tabla y, fuera de captura, borra lo guardado |
@@ -105,14 +110,14 @@ Requisitos: **ESP-IDF 5.5** instalado y activado, y una placa ESP32 o ESP32-C3 c
 | `GET /csv` | datos guardados |
 | `WS /ws` | un mensaje por experimento terminado |
 
-Cada experimento: `{"n":12,"m":1,"v":-350,"a":1204,"ts":1760000000000}`, con `v` y `a` en **µs** (`null` si no hubo señal), `m` si llegó la marca y `ts` en ms desde 1970.
+Cada experimento: `{"n":12,"m":1,"v":-350,"l":1204,"r":1210,"ts":1760000000000}`, con `v` (visual), `l` (izquierdo) y `r` (derecho) en **µs** (`null` si no hubo señal), `m` si llegó la marca y `ts` en ms desde 1970.
 
-**CSV:** `n, epoch_ms, hora_utc, marca, visual_us, auditivo_us`. Los campos vacíos indican que no hubo señal o que el equipo no tenía la hora.
+**CSV:** `n, epoch_ms, hora_utc, marca, visual_us, aud_izq_us, aud_der_us`. Los campos vacíos indican que no hubo señal o que el equipo no tenía la hora.
 
 ## Limitaciones conocidas
 
 - Un usuario a la vez y red local. El portal es una red abierta (puedes fijar una clave WPA2 con `AP_PASS` en `net.c`), sin cifrado.
-- Capacidad: unos 10 900 experimentos por captura; al llenarse, deja de guardar.
+- Capacidad: unos 8 000 experimentos (8 192) por captura; al llenarse, deja de guardar.
 - Si un estímulo no responde, el experimento queda abierto hasta la duración máxima, y los flancos del siguiente se le asignarían. Mantén la duración máxima por debajo del período entre experimentos.
 - El equipo no tiene reloj propio: la hora la fija la página al cargar (precisión de decenas de ms). Los Δ no dependen de ella.
 - Con el WiFi apagado solo se termina con el botón o el reset; el equipo no avisa por radio.

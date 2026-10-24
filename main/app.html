@@ -36,7 +36,7 @@ details{margin-top:1.2rem;border:1px solid #8886;border-radius:.6rem;padding:.5r
 
 <h2>Experimentos</h2>
 <div class="row"><button type="button" onclick="clr()">Limpiar</button></div>
-<table><thead><tr><th>#</th><th>Hora</th><th>Estímulo visual</th><th>Estímulo auditivo</th></tr></thead>
+<table><thead><tr><th>#</th><th>Hora</th><th>Estímulo visual</th><th>Aud. izquierdo</th><th>Aud. derecho</th></tr></thead>
 <tbody id="rows"></tbody></table>
 
 <details><summary>Configuración</summary>
@@ -44,7 +44,8 @@ details{margin-top:1.2rem;border:1px solid #8886;border-radius:.6rem;padding:.5r
   <div class="row"><label>Duración máxima de un experimento (ms)</label><input id="max" type="number" min="10" max="60000"></div>
   <div class="row"><label>Flanco de la marca (solo si es por pin)</label><select id="r0"><option value="0">Bajada</option><option value="1">Subida</option></select></div>
   <div class="row"><label>Flanco del estímulo visual</label><select id="r1"><option value="0">Bajada</option><option value="1">Subida</option></select></div>
-  <div class="row"><label>Flanco del estímulo auditivo</label><select id="r2"><option value="0">Bajada</option><option value="1">Subida</option></select></div>
+  <div class="row"><label>Flanco del estímulo auditivo izquierdo</label><select id="r2"><option value="0">Bajada</option><option value="1">Subida</option></select></div>
+  <div class="row"><label>Flanco del estímulo auditivo derecho</label><select id="r3"><option value="0">Bajada</option><option value="1">Subida</option></select></div>
   <div class="row"><label>Origen de la marca</label><select id="src"><option value="0">Pin (GPIO)</option><option value="1">Puerto serie (USB)</option></select></div>
   <div class="row"><label><input id="wo" type="checkbox"> Apagar el WiFi durante la captura</label></div>
   <div class="row"><button type="button" onclick="save()">Guardar</button><span id="cm"></span></div>
@@ -63,12 +64,12 @@ function srow(name,s){
     :`<tr><th>${name}</th><td>0</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>`;
 }
 function render(){
-  $('stats').innerHTML=srow('Visual',S.sv)+srow('Auditivo',S.sa);
-  $('rows').innerHTML=T.slice().reverse().map(t=>`<tr><td>${t.n}</td><td title="${t.ts==null?'':new Date(t.ts).toLocaleString('es')}">${hora(t.ts)}</td><td>${cell(t,'v')}</td><td>${cell(t,'a')}</td></tr>`).join('');
+  $('stats').innerHTML=srow('Visual',S.sv)+srow('Aud. izquierdo',S.sl)+srow('Aud. derecho',S.sr);
+  $('rows').innerHTML=T.slice().reverse().map(t=>`<tr><td>${t.n}</td><td title="${t.ts==null?'':new Date(t.ts).toLocaleString('es')}">${hora(t.ts)}</td><td>${cell(t,'v')}</td><td>${cell(t,'l')}</td><td>${cell(t,'r')}</td></tr>`).join('');
 }
 function fillCfg(c){$('gap').value=c.gap;$('max').value=c.max;c.r.forEach((v,i)=>$('r'+i).value=v);$('wo').checked=!!c.wo;$('src').value=c.src}
 async function save(){
-  const body={gap:+$('gap').value,max:+$('max').value,r:[0,1,2].map(i=>+$('r'+i).value),wifi_off:$('wo').checked?1:0,src:+$('src').value};
+  const body={gap:+$('gap').value,max:+$('max').value,r:[0,1,2,3].map(i=>+$('r'+i).value),wifi_off:$('wo').checked?1:0,src:+$('src').value};
   try{
     const r=await fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     $('cm').textContent=r.ok?'Guardado':'Valores fuera de rango';
@@ -81,7 +82,7 @@ async function clr(){
 let ST={mode:0,stored:0};
 const MODES=['Configuración','Esperando a que se desconecte el teléfono…','Capturando'];
 function showMode(s){$('mode').textContent=MODES[s.mode]+' — guardados: '+s.stored;$('bx').hidden=s.mode===0;$('bs').disabled=s.mode!==0}
-function reload(){fetch('/state').then(r=>r.json()).then(s=>{ST=s;showMode(s);T=s.h;S={sv:s.sv,sa:s.sa};render()}).catch(()=>{})}
+function reload(){fetch('/state').then(r=>r.json()).then(s=>{ST=s;showMode(s);T=s.h;S={sv:s.sv,sl:s.sl,sr:s.sr};render()}).catch(()=>{})}
 async function start(){
   if(!confirm('Se borrarán los datos guardados antes. ¿Iniciar la captura?'))return;
   await save();
@@ -100,11 +101,11 @@ function connect(){
   ws.onmessage=e=>{
     const m=JSON.parse(e.data);
     T.push(m.t);if(ST.mode===2){ST.stored++;showMode(ST)}if(T.length>300)T.shift();
-    S={sv:m.sv,sa:m.sa};render();
+    S={sv:m.sv,sl:m.sl,sr:m.sr};render();
   };
   ws.onclose=()=>{$('st').textContent='Reconectando…';setTimeout(connect,1500)};
 }
 render();
-sync().then(()=>fetch('/state')).then(r=>r.json()).then(s=>{fillCfg(s.cfg);ST=s;showMode(s);T=s.h;S={sv:s.sv,sa:s.sa};render()})
+sync().then(()=>fetch('/state')).then(r=>r.json()).then(s=>{fillCfg(s.cfg);ST=s;showMode(s);T=s.h;S={sv:s.sv,sl:s.sl,sr:s.sr};render()})
   .catch(()=>{}).finally(connect);
 </script></body></html>

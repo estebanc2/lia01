@@ -25,23 +25,23 @@
 /* ----------------------------------------------------------------------------- */
 
 #define NONE INT32_MIN                /* "sin dato" */
-static const gpio_num_t PINS[3] = { PIN_MARCA, PIN_VIS, PIN_AUD };
+static const gpio_num_t PINS[4] = { PIN_MARCA, PIN_VIS, PIN_AUD_L, PIN_AUD_R };
 
-typedef struct { uint32_t gap_ms, max_ms; uint8_t rise[3], wifi_off, src; } cfg_t;     /* rise: 0 = bajada, 1 = subida */
+typedef struct { uint32_t gap_ms, max_ms; uint8_t rise[4], wifi_off, src; } cfg_t;     /* rise: 0 = bajada, 1 = subida */
 typedef struct { uint32_t n; double mean, m2; int32_t min, max; } stat_t;
-typedef struct { uint32_t n; int m; int32_t v, a; int64_t ts_ms; } trial_t;            /* m: llego la marca; v, a en us */
+typedef struct { uint32_t n; int m; int32_t v, l, r; int64_t ts_ms; } trial_t;            /* m: llego la marca; v, a en us */
 
 extern const char app_html_start[] asm("_binary_app_html_start");
 
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;   /* protege lo que tocan las ISR */
 static SemaphoreHandle_t s_dmx;                              /* protege historial y estadisticas */
-static cfg_t s_cfg = { DEF_GAP_MS, DEF_MAX_MS, { 0, 0, 0 }, 1, 1 };
+static cfg_t s_cfg = { DEF_GAP_MS, DEF_MAX_MS, { 0, 0, 0, 0 }, 1, 1 };
 static volatile int64_t s_gap_us = DEF_GAP_MS * 1000LL, s_max_us = DEF_MAX_MS * 1000LL;
-static volatile int64_t s_t0, s_t[3], s_last[3];
+static volatile int64_t s_t0, s_t[4], s_last[4];
 static volatile bool s_armed;
 static volatile int64_t s_epoch_off_us;     /* reloj real - esp_timer, en us; 0 = sin sincronizar */
 static trial_t s_hist[HIST_N];
-static stat_t s_st[2];                                       /* [0] visual, [1] auditivo */
+static stat_t s_st[3];                                       /* [0] visual, [1] auditivo */
 static uint32_t s_count;
 static httpd_handle_t s_srv;
 
@@ -57,7 +57,7 @@ static void IRAM_ATTR edge_at(int ch, int64_t now)
     } else if (now - s_last[ch] >= s_gap_us) {
         s_armed = true;
         s_t0 = now;
-        s_t[0] = s_t[1] = s_t[2] = 0;
+        s_t[0] = s_t[1] = s_t[2] = s_t[3] = 0;
         s_t[ch] = now;
     }
     s_last[ch] = now;
@@ -66,7 +66,8 @@ static void IRAM_ATTR edge_at(int ch, int64_t now)
 static void IRAM_ATTR on_edge(int ch) { edge_at(ch, esp_timer_get_time()); }
 static void IRAM_ATTR isr_marca(void *a) { on_edge(0); }
 static void IRAM_ATTR isr_vis(void *a)   { on_edge(1); }
-static void IRAM_ATTR isr_aud(void *a)   { on_edge(2); }
+static void IRAM_ATTR isr_al(void *a)    { on_edge(2); }
+static void IRAM_ATTR isr_ar(void *a)    { on_edge(3); }
 
 /* ------------------------------------------------------------ resultados --- */
 static void stat_add(stat_t *s, int32_t x)    /* media y desviacion en una pasada (Welford) */
@@ -83,10 +84,11 @@ static int fmt_val(char *b, int32_t v) { return v == NONE ? sprintf(b, "null") :
 
 static int fmt_trial(char *b, size_t n, const trial_t *t)
 {
-    char v[16], a[16], ts[24] = "null";
-    fmt_val(v, t->v); fmt_val(a, t->a);
+    char v[16], l[16], r[16], ts[24] = "null";
+    fmt_val(v, t->v); fmt_val(l, t->l); fmt_val(r, t->r);
     if (t->ts_ms) snprintf(ts, sizeof(ts), "%lld", (long long)t->ts_ms);
-    return snprintf(b, n, "{\"n\":%u,\"m\":%d,\"v\":%s,\"a\":%s,\"ts\":%s}", (unsigned)t->n, t->m, v, a, ts);
+    return snprintf(b, n, "{\"n\":%u,\"m\":%d,\"v\":%s,\"l\":%s,\"r\":%s,\"ts\":%s}",
+                    (unsigned)t->n, t->m, v, l, r, ts);
 }
 
 static int fmt_stat(char *b, size_t n, const stat_t *s)
@@ -100,16 +102,18 @@ static int fmt_stat(char *b, size_t n, const stat_t *s)
 
 static int fmt_stats(char *b, size_t n, const stat_t *s)
 {
-    int o = snprintf(b, n, "\"sv\":");
-    o += fmt_stat(b + o, n - o, &s[0]);
-    o += snprintf(b + o, n - o, ",\"sa\":");
-    o += fmt_stat(b + o, n - o, &s[1]);
+    static const char *k[3] = { "sv", "sl", "sr" };       /* visual, izquierdo, derecho */
+    int o = 0;
+    for (int i = 0; i < 3; i++) {
+        o += snprintf(b + o, n - o, "%s\"%s\":", i ? "," : "", k[i]);
+        o += fmt_stat(b + o, n - o, &s[i]);
+    }
     return o;
 }
 
 /* ---------------------------------------------------------- almacenamiento --- */
 /* Los experimentos de una captura se guardan en la particion "datos" (registros de 24 bytes). */
-typedef struct { uint32_t n; int32_t v, a; uint32_t m; int64_t ts; } rec_t;
+typedef struct { uint32_t n; int32_t v, l, r; uint32_t m; int64_t ts; } rec_t;   /* 32 bytes */
 static const esp_partition_t *s_part;
 static uint32_t s_stored;
 static volatile bool s_capturing;
@@ -117,7 +121,7 @@ static volatile bool s_capturing;
 static void storage_append(const trial_t *t)
 {
     if (!s_part || (s_stored + 1) * sizeof(rec_t) > s_part->size) return;      /* llena */
-    rec_t r = { .n = t->n, .v = t->v, .a = t->a, .m = t->m, .ts = t->ts_ms };
+    rec_t r = { .n = t->n, .v = t->v, .l = t->l, .r = t->r, .m = t->m, .ts = t->ts_ms };
     if (esp_partition_write(s_part, s_stored * sizeof(rec_t), &r, sizeof(r)) == ESP_OK) s_stored++;
 }
 
@@ -138,10 +142,11 @@ static void storage_load(void)
     while (s_part && (s_stored + 1) * sizeof(r) <= s_part->size &&
            esp_partition_read(s_part, s_stored * sizeof(r), &r, sizeof(r)) == ESP_OK &&
            r.n == s_stored + 1) {                       /* numeracion consecutiva: descarta datos viejos o basura */
-        trial_t t = { .n = r.n, .m = r.m, .v = r.v, .a = r.a, .ts_ms = r.ts };
+        trial_t t = { .n = r.n, .m = r.m, .v = r.v, .l = r.l, .r = r.r, .ts_ms = r.ts };
         s_hist[(t.n - 1) % HIST_N] = t;
         if (t.v != NONE) stat_add(&s_st[0], t.v);
-        if (t.a != NONE) stat_add(&s_st[1], t.a);
+        if (t.l != NONE) stat_add(&s_st[1], t.l);
+        if (t.r != NONE) stat_add(&s_st[2], t.r);
         s_count = t.n;
         s_stored++;
     }
@@ -162,10 +167,10 @@ static void meas_task(void *arg)
 {
     for (;;) {
         vTaskDelay(1);
-        int64_t now = esp_timer_get_time(), t[3], t0 = 0;
+        int64_t now = esp_timer_get_time(), t[4], t0 = 0;
         bool fin = false;
         portENTER_CRITICAL(&s_mux);
-        if (s_armed && ((s_t[0] && s_t[1] && s_t[2]) || now - s_t0 >= s_max_us)) {
+        if (s_armed && ((s_t[0] && s_t[1] && s_t[2] && s_t[3]) || now - s_t0 >= s_max_us)) {
             fin = true;
             s_armed = false;
             memcpy(t, (const void *)s_t, sizeof(t));
@@ -177,18 +182,20 @@ static void meas_task(void *arg)
         /* delta = instante del estimulo - instante de la marca (negativo si la marca llega despues) */
         trial_t tr = { .m = t[0] != 0, .ts_ms = s_epoch_off_us ? (s_epoch_off_us + t0) / 1000 : 0,
                        .v = (t[0] && t[1]) ? (int32_t)(t[1] - t[0]) : NONE,
-                       .a = (t[0] && t[2]) ? (int32_t)(t[2] - t[0]) : NONE };
-        stat_t snap[2];
+                       .l = (t[0] && t[2]) ? (int32_t)(t[2] - t[0]) : NONE,
+                       .r = (t[0] && t[3]) ? (int32_t)(t[3] - t[0]) : NONE };
+        stat_t snap[3];
         xSemaphoreTake(s_dmx, portMAX_DELAY);
         tr.n = ++s_count;
         s_hist[(tr.n - 1) % HIST_N] = tr;
         if (s_capturing) storage_append(&tr);
         if (tr.v != NONE) stat_add(&s_st[0], tr.v);
-        if (tr.a != NONE) stat_add(&s_st[1], tr.a);
+        if (tr.l != NONE) stat_add(&s_st[1], tr.l);
+        if (tr.r != NONE) stat_add(&s_st[2], tr.r);
         memcpy(snap, s_st, sizeof(snap));
         xSemaphoreGive(s_dmx);
 
-        char tj[96], sj[256], msg[400];
+        char tj[112], sj[320], msg[512];
         fmt_trial(tj, sizeof(tj), &tr);
         fmt_stats(sj, sizeof(sj), snap);
         snprintf(msg, sizeof(msg), "{\"t\":%s,%s}", tj, sj);
@@ -205,7 +212,7 @@ static void apply_cfg(const cfg_t *c)
     s_max_us = c->max_ms * 1000LL;
     s_armed = false;
     portEXIT_CRITICAL(&s_mux);
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
         gpio_set_intr_type(PINS[i], c->rise[i] ? GPIO_INTR_POSEDGE : GPIO_INTR_NEGEDGE);
         if (i == 0 && c->src) gpio_intr_disable(PINS[i]); else gpio_intr_enable(PINS[i]);
     }
@@ -238,23 +245,23 @@ static esp_err_t root_handler(httpd_req_t *req)
 
 static esp_err_t state_handler(httpd_req_t *req)
 {
-    const size_t SZ = HIST_N * 80 + 512;
+    const size_t SZ = HIST_N * 96 + 768;
     char *b = malloc(SZ);
     if (!b) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, NULL);
-    trial_t h[HIST_N]; stat_t snap[2]; uint32_t total;
+    trial_t h[HIST_N]; stat_t snap[3]; uint32_t total;
     xSemaphoreTake(s_dmx, portMAX_DELAY);
     total = s_count;
     memcpy(h, s_hist, sizeof(h));
     memcpy(snap, s_st, sizeof(snap));
     xSemaphoreGive(s_dmx);
 
-    size_t o = snprintf(b, SZ, "{\"mode\":%d,\"stored\":%u,\"cfg\":{\"gap\":%u,\"max\":%u,\"r\":[%d,%d,%d],\"wo\":%d,\"src\":%d},\"h\":[",
+    size_t o = snprintf(b, SZ, "{\"mode\":%d,\"stored\":%u,\"cfg\":{\"gap\":%u,\"max\":%u,\"r\":[%d,%d,%d,%d],\"wo\":%d,\"src\":%d},\"h\":[",
                         (int)session_state(), (unsigned)s_stored, (unsigned)s_cfg.gap_ms, (unsigned)s_cfg.max_ms,
-                        s_cfg.rise[0], s_cfg.rise[1], s_cfg.rise[2], s_cfg.wifi_off, s_cfg.src);
+                        s_cfg.rise[0], s_cfg.rise[1], s_cfg.rise[2], s_cfg.rise[3], s_cfg.wifi_off, s_cfg.src);
     uint32_t cnt = total < HIST_N ? total : HIST_N;
     for (uint32_t i = 0; i < cnt; i++) {
         if (i) b[o++] = ',';
-        o += fmt_trial(b + o, 80, &h[(total - cnt + i) % HIST_N]);
+        o += fmt_trial(b + o, 96, &h[(total - cnt + i) % HIST_N]);
     }
     o += snprintf(b + o, SZ - o, "],");
     o += fmt_stats(b + o, SZ - o, snap);
@@ -279,7 +286,7 @@ static esp_err_t config_handler(httpd_req_t *req)
     if (cJSON_IsNumber(m)) c.max_ms = m->valueint;
     if (cJSON_IsNumber(w)) c.wifi_off = w->valueint != 0;
     if (cJSON_IsNumber(sr)) c.src = sr->valueint != 0;
-    for (int i = 0; i < 3 && cJSON_IsArray(r); i++) {
+    for (int i = 0; i < 4 && cJSON_IsArray(r); i++) {
         const cJSON *e = cJSON_GetArrayItem(r, i);
         if (cJSON_IsNumber(e)) c.rise[i] = e->valueint != 0;
     }
@@ -341,12 +348,12 @@ static esp_err_t csv_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/csv; charset=utf-8");
     httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"experimentos.csv\"");
-    httpd_resp_sendstr_chunk(req, "n,epoch_ms,hora_utc,marca,visual_us,auditivo_us\r\n");
+    httpd_resp_sendstr_chunk(req, "n,epoch_ms,hora_utc,marca,visual_us,aud_izq_us,aud_der_us\r\n");
     rec_t r;
     char line[128];
     for (uint32_t i = 0; i < s_stored; i++) {
         if (esp_partition_read(s_part, i * sizeof(r), &r, sizeof(r)) != ESP_OK) break;
-        char ep[24] = "", hr[32] = "", v[16] = "", a[16] = "";
+        char ep[24] = "", hr[32] = "", v[16] = "", l[16] = "", d[16] = "";
         if (r.ts) {
             time_t sec = r.ts / 1000;
             struct tm tm;
@@ -356,8 +363,9 @@ static esp_err_t csv_handler(httpd_req_t *req)
             snprintf(ep, sizeof(ep), "%lld", (long long)r.ts);
         }
         if (r.v != NONE) snprintf(v, sizeof(v), "%d", (int)r.v);
-        if (r.a != NONE) snprintf(a, sizeof(a), "%d", (int)r.a);
-        snprintf(line, sizeof(line), "%u,%s,%s,%u,%s,%s\r\n", (unsigned)r.n, ep, hr, (unsigned)r.m, v, a);
+        if (r.l != NONE) snprintf(l, sizeof(l), "%d", (int)r.l);
+        if (r.r != NONE) snprintf(d, sizeof(d), "%d", (int)r.r);
+        snprintf(line, sizeof(line), "%u,%s,%s,%u,%s,%s,%s\r\n", (unsigned)r.n, ep, hr, (unsigned)r.m, v, l, d);
         if (httpd_resp_sendstr_chunk(req, line) != ESP_OK) return ESP_FAIL;
     }
     return httpd_resp_send_chunk(req, NULL, 0);
@@ -398,10 +406,10 @@ void measure_start(void)
     storage_load();
     cfg_t c = s_cfg;
     cfg_load(&c);
-    for (int i = 0; i < 3; i++) s_last[i] = -(1LL << 40);
+    for (int i = 0; i < 4; i++) s_last[i] = -(1LL << 40);
 
     gpio_config_t io = {
-        .pin_bit_mask = (1ULL << PIN_MARCA) | (1ULL << PIN_VIS) | (1ULL << PIN_AUD),
+        .pin_bit_mask = (1ULL << PIN_MARCA) | (1ULL << PIN_VIS) | (1ULL << PIN_AUD_L) | (1ULL << PIN_AUD_R),
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = PULLUP_INTERNAL ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE,
         .intr_type = GPIO_INTR_NEGEDGE,
@@ -410,7 +418,8 @@ void measure_start(void)
     gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
     gpio_isr_handler_add(PIN_MARCA, isr_marca, NULL);
     gpio_isr_handler_add(PIN_VIS, isr_vis, NULL);
-    gpio_isr_handler_add(PIN_AUD, isr_aud, NULL);
+    gpio_isr_handler_add(PIN_AUD_L, isr_al, NULL);
+    gpio_isr_handler_add(PIN_AUD_R, isr_ar, NULL);
     apply_cfg(&c);
     xTaskCreate(meas_task, "meas", 4096, NULL, 6, NULL);
 }
