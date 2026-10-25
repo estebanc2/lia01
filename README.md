@@ -6,11 +6,11 @@ Firmware para **ESP32 / ESP32-C3** (ESP-IDF 5.5) que mide, con resolución de mi
 
 ## Cómo se usa
 
-1. **Configurar.** Al encender, el equipo crea la red WiFi abierta `Medidor-XXXX`. Conéctate con el teléfono; se abre la página (o entra a `http://192.168.4.1`). Ajusta la separación mínima, la duración máxima, el flanco de cada señal, el origen de la marca y si se apaga el WiFi durante la captura. Con señales de prueba, la tabla y las estadísticas se ven en vivo.
+1. **Configurar.** Al encender, el equipo crea la red WiFi abierta `Medidor-XXXX`. Conéctate con el teléfono o la computadora y abre **`http://192.168.4.1`** en el navegador (el nombre de la red no es una dirección web). El equipo responde a las comprobaciones de internet de macOS, iOS, Android y Windows como si hubiera conexión, para que no se abra la ventana de inicio de sesión (cámbialo con `CAPTIVE_PORTAL` en `net.c`). Ajusta la separación mínima, la duración máxima, el flanco de cada señal, el origen de la marca y si se apaga el WiFi durante la captura. Con señales de prueba, la tabla y las estadísticas se ven en vivo.
 2. **Iniciar captura.** Borra los datos guardados antes (descárgalos primero) y empieza a guardar cada experimento en flash.
-   - Con **«Apagar el WiFi durante la captura»**, el equipo espera a que se desconecte el último dispositivo (2 s) y apaga el radio por completo.
+   - Con **«Apagar el WiFi durante la captura»**, el equipo espera a que se desconecte el último dispositivo (2 s) y apaga el radio por completo. En el teléfono hay que apagar el WiFi o «olvidar» la red `Medidor-XXXX`: si se reconecta solo, el equipo no la apaga.
    - Sin esa opción, sigue en línea: la página muestra los resultados en vivo y tiene un botón **Detener captura**.
-3. **Capturar.** Un LED hace un destello breve cada 2 s mientras captura (en la DevKitC-02, el LED RGB destella en verde; con «Apagar el WiFi» muestra ámbar fijo mientras espera a que se desconecte el teléfono).
+3. **Capturar.** Un LED hace un destello breve cada 2 s mientras captura (en la DevKitC-02, el LED RGB destella en verde; con «Apagar el WiFi» muestra ámbar fijo mientras espera a que se desconecte el teléfono; en configuración queda en azul tenue, y al encender hace una prueba rojo, verde, azul).
 4. **Terminar.** Pulsa el **botón de fin** (o el reset). Vuelve el WiFi con los datos disponibles.
 5. **Descargar.** En la página: tabla, estadísticas (media, desviación estándar, mínimo, máximo) y **Descargar CSV**.
 
@@ -67,7 +67,15 @@ En el **ESP32 clásico**, los GPIO 6 a 11 pertenecen a la flash y no deben usars
 - **Estéreo:** el canal izquierdo y el derecho necesitan cada uno su micrófono (o salida del equipo de audio), amplificador y comparador, con el mismo retardo. Si los circuitos no son idénticos, la diferencia izquierda−derecha incluirá la del circuito.
 - Si el LED de estado está cerca del sensor visual, colócalo en una caja o pantalla opaca.
 
-![esquematico](esquema.png)
+## Esquema de la placa
+
+![Esquema de la placa](docs/esquema.png)
+
+- **USB:** conector USB mini-B con D+ y D− a los pines USB nativos del ESP32-C3 (GPIO19 y GPIO18) y VBUS al pin de 5 V. La marca (`tD`, disparo del estímulo) llega por este puerto serie USB.
+- **Estímulo visual (`tv`):** fototransistor con el emisor a masa y el colector al GPIO5.
+- **Estímulos auditivos (`tai` izquierdo, `tad` derecho):** conector jack estéreo. Cada canal pasa por un condensador de 100 nF a la base de un transistor NPN, con 100 kΩ de la base a masa y el emisor a masa. Los colectores van al GPIO6 (izquierdo) y al GPIO7 (derecho).
+- Las tres entradas usan el **pull-up interno** del chip (`PULLUP_INTERNAL`), sin resistencia externa. Como cada una baja a masa al activarse, el flanco por defecto, **de bajada**, es el correcto.
+- **Canal de audio:** el transistor conduce solo con los picos positivos que superan unos 0,6 a 0,7 V, así que un tono produce una tira de pulsos (el firmware usa solo el primero) y la señal del jack debe alcanzar ese valor de pico. Los dos canales pueden diferir ligeramente (tensión base-emisor de cada transistor): para medir el desfase propio del circuito, aplica la misma señal a ambos y mide la diferencia izquierdo − derecho.
 
 ## Estructura
 
@@ -129,7 +137,8 @@ Cada experimento: `{"n":12,"m":1,"v":-350,"l":1204,"r":1210,"ts":1760000000000}`
 - [x] Medición por interrupciones, estadísticas y configuración, probado con señales reales
 - [ ] Validación del flujo nuevo: punto de acceso, captura en flash, CSV y apagado del WiFi
 - [ ] Validación de la marca por puerto serie
-- [ ] Diseño de la placa con acondicionamiento de señal
+- [ ] Placa propia (esquema en [docs/esquema.png](docs/esquema.png)): revisar, fabricar y validar
+- [ ] Marca por USB nativo (USB-Serial-JTAG) para la placa propia
 
 ## Licencia
 

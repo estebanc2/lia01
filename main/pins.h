@@ -19,4 +19,4 @@
 #define PIN_STOP  GPIO_NUM_9
 #endif
 #define LED_ACTIVE_HIGH 1         /* LED simple: 0 si enciende con nivel bajo */
-#define LED_BRIGHT 12             /* LED RGB: brillo, de 0 a 255 (bajo, para no molestar al sensor visual) */
+#define LED_BRIGHT 40             /* LED RGB: brillo, de 0 a 255 (bajo, para no molestar al sensor visual) */

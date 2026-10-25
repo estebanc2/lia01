@@ -12,6 +12,9 @@ td,th{padding:.3rem .4rem;text-align:right;border-bottom:1px solid #8884}
 th:first-child,td:first-child{text-align:left}
 button,input,select{font:inherit;padding:.5rem .7rem;border-radius:.5rem;border:1px solid #888;box-sizing:border-box}
 button{background:Canvas;color:CanvasText}
+button:active{transform:translateY(1px);filter:brightness(.8)}
+button:disabled{opacity:.45}
+button.ok{background:#2f9e44;border-color:#2f9e44;color:#fff}
 .row{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:.4rem 0}
 .row label{flex:1 1 15rem}
 input[type=number]{width:7rem}
@@ -35,7 +38,7 @@ details{margin-top:1.2rem;border:1px solid #8886;border-radius:.6rem;padding:.5r
 <small>Iniciar borra los datos guardados antes: descárgalos primero. Con el WiFi apagado, la captura empieza al desconectar el teléfono y termina al pulsar el botón del equipo.</small>
 
 <h2>Experimentos</h2>
-<div class="row"><button type="button" onclick="clr()">Limpiar</button></div>
+<div class="row"><button type="button" id="bc" onclick="clr()">Limpiar</button></div>
 <table><thead><tr><th>#</th><th>Hora</th><th>Estímulo visual</th><th>Aud. izquierdo</th><th>Aud. derecho</th></tr></thead>
 <tbody id="rows"></tbody></table>
 
@@ -48,7 +51,7 @@ details{margin-top:1.2rem;border:1px solid #8886;border-radius:.6rem;padding:.5r
   <div class="row"><label>Flanco del estímulo auditivo derecho</label><select id="r3"><option value="0">Bajada</option><option value="1">Subida</option></select></div>
   <div class="row"><label>Origen de la marca</label><select id="src"><option value="0">Pin (GPIO)</option><option value="1">Puerto serie (USB)</option></select></div>
   <div class="row"><label><input id="wo" type="checkbox"> Apagar el WiFi durante la captura</label></div>
-  <div class="row"><button type="button" onclick="save()">Guardar</button><span id="cm"></span></div>
+  <div class="row"><button type="button" id="bg" onclick="save()">Guardar</button><span id="cm"></span></div>
   <small>Un experimento comienza con el primer flanco de cualquiera de las tres señales, y termina cuando llegaron las tres o se cumple la duración máxima. Una señal debe llevar al menos la separación mínima sin flancos para poder iniciar un experimento nuevo.</small>
 </details>
 
@@ -69,32 +72,44 @@ function render(){
 }
 function fillCfg(c){$('gap').value=c.gap;$('max').value=c.max;c.r.forEach((v,i)=>$('r'+i).value=v);$('wo').checked=!!c.wo;$('src').value=c.src}
 async function save(){
+  const b=$('bg');b.disabled=true;b.textContent='Guardando…';
   const body={gap:+$('gap').value,max:+$('max').value,r:[0,1,2,3].map(i=>+$('r'+i).value),wifi_off:$('wo').checked?1:0,src:+$('src').value};
+  let ok=false;
   try{
     const r=await fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    $('cm').textContent=r.ok?'Guardado':'Valores fuera de rango';
+    ok=r.ok;$('cm').textContent=ok?'':'Valores fuera de rango';
   }catch(e){$('cm').textContent='No se pudo guardar'}
+  b.textContent=ok?'Guardado ✓':'Error';b.classList.toggle('ok',ok);
+  setTimeout(()=>{b.textContent='Guardar';b.classList.remove('ok');b.disabled=false},1500);
+  return ok;
 }
 async function clr(){
   if(!confirm('¿Borrar la tabla, las estadísticas y los datos guardados?'))return;
+  const b=$('bc');b.disabled=true;b.textContent='Borrando…';
   try{await fetch('/clear',{method:'POST'});T=[];S={};ST.stored=0;showMode(ST);render()}catch(e){}
+  b.disabled=false;b.textContent='Limpiar';
 }
 let ST={mode:0,stored:0};
-const MODES=['Configuración','Esperando a que se desconecte el teléfono…','Capturando'];
+const MODES=['Configuración','Esperando: apaga el WiFi del teléfono o desconéctate de esta red; el equipo apagará su WiFi 2 s después','Capturando'];
 function showMode(s){$('mode').textContent=MODES[s.mode]+' — guardados: '+s.stored;$('bx').hidden=s.mode===0;$('bs').disabled=s.mode!==0}
 function reload(){fetch('/state').then(r=>r.json()).then(s=>{ST=s;showMode(s);T=s.h;S={sv:s.sv,sl:s.sl,sr:s.sr};render()}).catch(()=>{})}
 async function start(){
   if(!confirm('Se borrarán los datos guardados antes. ¿Iniciar la captura?'))return;
+  const b=$('bs');b.disabled=true;b.textContent='Preparando…';
   await save();
   $('mode').textContent='Preparando… (borrando datos anteriores)';
   try{
     const r=await(await fetch('/start',{method:'POST'})).json();
-    if(!r.ok){$('mode').textContent='No se pudo iniciar';return}
-    T=[];S={};render();
-    ST={mode:$('wo').checked?1:2,stored:0};showMode(ST);
-  }catch(e){$('mode').textContent='Sin respuesta del equipo'}
+    if(!r.ok){$('mode').textContent='No se pudo iniciar';b.disabled=false}
+    else{T=[];S={};render();ST={mode:$('wo').checked?1:2,stored:0};showMode(ST)}
+  }catch(e){$('mode').textContent='Sin respuesta del equipo';b.disabled=false}
+  b.textContent='Iniciar captura';
 }
-async function stop(){try{await fetch('/stop',{method:'POST'});reload()}catch(e){}}
+async function stop(){
+  const b=$('bx');b.disabled=true;b.textContent='Deteniendo…';
+  try{await fetch('/stop',{method:'POST'});reload()}catch(e){}
+  b.disabled=false;b.textContent='Detener captura';
+}
 function connect(){
   const ws=new WebSocket('ws://'+location.host+'/ws');
   ws.onopen=()=>{$('st').textContent='Conectado — esperando experimentos';sync()};

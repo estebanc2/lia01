@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_log.h"
 #include "soc/soc_caps.h"
 #include "driver/gpio.h"
 #include "driver/rmt_tx.h"
@@ -12,6 +13,7 @@
 
 static volatile session_state_t s_state = S_IDLE;
 static bool s_net_up;
+static const char *TAG = "sesion";
 
 /* ------------------------------------------------------------------- LED --- */
 #if LED_RGB
@@ -31,16 +33,19 @@ static void led_init(void)
         .bit1 = { .level0 = 1, .duration0 = 9, .level1 = 0, .duration1 = 3 },   /* 0,9 us alto + 0,3 us bajo */
         .flags.msb_first = 1,
     };
-    rmt_new_tx_channel(&c, &s_led_ch);
-    rmt_new_bytes_encoder(&e, &s_led_enc);
-    rmt_enable(s_led_ch);
+    esp_err_t err = rmt_new_tx_channel(&c, &s_led_ch);
+    if (err == ESP_OK) err = rmt_new_bytes_encoder(&e, &s_led_enc);
+    if (err == ESP_OK) err = rmt_enable(s_led_ch);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "LED RGB no disponible: %s", esp_err_to_name(err)); s_led_ch = NULL; }
 }
 
 static void led_write(int r, int g, int b)
 {
+    if (!s_led_ch) return;
     s_px[0] = g; s_px[1] = r; s_px[2] = b;    /* el WS2812 espera el orden verde, rojo, azul */
     rmt_transmit_config_t t = { .loop_count = 0 };
-    rmt_transmit(s_led_ch, s_led_enc, s_px, sizeof(s_px), &t);
+    esp_err_t err = rmt_transmit(s_led_ch, s_led_enc, s_px, sizeof(s_px), &t);
+    if (err != ESP_OK) ESP_LOGE(TAG, "LED RGB: %s", esp_err_to_name(err));
 }
 #else
 static void led_init(void)
@@ -87,6 +92,10 @@ void session_stop(void)
 static void control_task(void *arg)
 {
     led_init();
+    /* prueba al arrancar: rojo, verde y azul (confirma que el LED funciona) */
+    led_set(64, 0, 0); vTaskDelay(pdMS_TO_TICKS(300));
+    led_set(0, 64, 0); vTaskDelay(pdMS_TO_TICKS(300));
+    led_set(0, 0, 64); vTaskDelay(pdMS_TO_TICKS(300));
     led_set(0, 0, 0);
     gpio_config_t btn = { .pin_bit_mask = 1ULL << PIN_STOP, .mode = GPIO_MODE_INPUT,
                           .pull_up_en = GPIO_PULLUP_ENABLE };
@@ -97,10 +106,10 @@ static void control_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(100));
         tick++;
 
-        /* LED: captura = destello verde de 100 ms cada 2 s; espera = ambar fijo; configuracion = apagado */
+        /* LED: captura = destello verde de 100 ms cada 2 s; espera = ambar fijo; configuracion = azul tenue */
         if (s_state == S_CAPTURE)   { if (tick % 20 == 0) led_set(0, LED_BRIGHT, 0); else led_set(0, 0, 0); }
         else if (s_state == S_WAIT) led_set(LED_BRIGHT, LED_BRIGHT / 2, 0);
-        else                        led_set(0, 0, 0);
+        else                        led_set(0, 0, LED_BRIGHT);
 
         /* boton: termina la captura (o cancela la espera) */
         if (gpio_get_level(PIN_STOP) == 0) {
@@ -110,8 +119,11 @@ static void control_task(void *arg)
 
         /* con "apagar WiFi": cuando no queda ningun dispositivo conectado por 2 s, se apaga el radio */
         if (s_state == S_WAIT) {
-            quiet = (net_clients() == 0) ? quiet + 1 : 0;
+            int n = net_clients();
+            quiet = (n == 0) ? quiet + 1 : 0;
+            if (tick % 10 == 0) ESP_LOGI(TAG, "esperando la desconexion: %d dispositivo(s) conectado(s)", n);
             if (quiet >= 20) {
+                ESP_LOGI(TAG, "WiFi apagado: comienza la captura");
                 net_stop();
                 s_net_up = false;
                 s_state = S_CAPTURE;

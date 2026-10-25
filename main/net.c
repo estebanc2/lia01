@@ -10,6 +10,8 @@
 #include "net.h"
 #include "measure.h"
 
+#define CAPTIVE_PORTAL 0   /* 0 = responder las comprobaciones de internet como si lo hubiera (no se abre la ventanita
+                              de inicio de sesion; se entra a http://192.168.4.1); 1 = abrirla y redirigir a la pagina */
 #define AP_PASS ""        /* vacio = red abierta; con 8 o mas caracteres, WPA2 */
 
 static httpd_handle_t s_httpd;
@@ -47,9 +49,24 @@ static void dns_task(void *arg)
     vTaskDelete(NULL);
 }
 
-/* Cualquier URL desconocida (generate_204, hotspot-detect.html...) lleva a la pagina. */
+/* Comprobaciones de "hay internet" de cada sistema: macOS/iOS (hotspot-detect), Android (generate_204),
+ * Windows (connecttest, ncsi) y Firefox (success.txt). Cualquier otra URL desconocida lleva a la pagina. */
 static esp_err_t redirect_handler(httpd_req_t *req, httpd_err_code_t err)
 {
+#if !CAPTIVE_PORTAL
+    const char *u = req->uri;
+    if (strstr(u, "hotspot-detect") || strstr(u, "library/test/success")) {
+        httpd_resp_set_type(req, "text/html");
+        return httpd_resp_sendstr(req, "<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>");
+    }
+    if (strstr(u, "generate_204") || strstr(u, "gen_204")) {
+        httpd_resp_set_status(req, "204 No Content");
+        return httpd_resp_send(req, NULL, 0);
+    }
+    if (strstr(u, "connecttest.txt")) return httpd_resp_sendstr(req, "Microsoft Connect Test");
+    if (strstr(u, "ncsi.txt"))        return httpd_resp_sendstr(req, "Microsoft NCSI");
+    if (strstr(u, "success.txt"))     return httpd_resp_sendstr(req, "success\n");
+#endif
     httpd_resp_set_status(req, "302 Found");
     httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
     return httpd_resp_send(req, NULL, 0);
@@ -78,6 +95,7 @@ void net_start(void)
     esp_wifi_set_mode(WIFI_MODE_AP);
     esp_wifi_set_config(WIFI_IF_AP, &ap);
     esp_wifi_start();
+    esp_wifi_set_inactive_time(WIFI_IF_AP, 20);   /* un dispositivo que se fue sin avisar deja de contar a los 20 s (por defecto, 300 s) */
 
     xTaskCreate(dns_task, "dns", 3072, NULL, 4, NULL);
     httpd_config_t hc = HTTPD_DEFAULT_CONFIG();
